@@ -1,6 +1,6 @@
 /* Programmer: Irfan Aiman Bin Zuraidi @ Acestatixs
 Date: Tuesday, 3 December 2024
-Matrix No: J04STM23F021
+Matrix No: n0p3
 Class: STM 3B
 Subject: Project
 File Name: IR_Telebot2.0.cpp
@@ -20,10 +20,10 @@ Super Visor: Puan Norazila Binti Samuri  */
 #define ir3 D6
 #define ir4 D7
 
-const char* ssid = "Kerajaan FIRAUN";
-const char* password = "Heyyounotyou0101";
-const char* telegramToken = "8006813593:AAE5IOZaz4d_0MfQGnAJPHx-zIBFta7bhkA";
-const char* chat_id = "5820132993";
+const char* ssid = "Enter your wifi/hotspot name";
+const char* password = "Enter your wifi password";
+const char* telegramToken = "Enter your bot token i.e xxxxx:abduiwdbueidwfew";
+const char* chat_id = "Enter your chat id";
 
 WiFiClientSecure client;
 UniversalTelegramBot bot(telegramToken, client);
