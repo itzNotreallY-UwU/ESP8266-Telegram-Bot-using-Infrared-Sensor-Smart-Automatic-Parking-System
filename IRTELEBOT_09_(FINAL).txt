@@ -1,0 +1,200 @@
+/* Programmer: Irfan Aiman Bin Zuraidi @ Acestatixs
+Date: Tuesday, 3 December 2024
+Matrix No: J04STM23F021
+Class: STM 3B
+Subject: Project
+File Name: IR_Telebot2.0.cpp
+Program purpose: This program is designed to monitor and manage car parking slots using an ESP8266 WiFi module and infrared sensors.
+Lecturer: Puan Siti Nurr Hidayah Binti Sanif
+Super Visor: Puan Norazila Binti Samuri  */
+
+#include <ESP8266WiFi.h>
+#include <WiFiClientSecure.h>
+#include <UniversalTelegramBot.h>
+#include <NTPClient.h>
+#include <WiFiUdp.h>
+#include <TimeLib.h>
+
+#define ir1 D0
+#define ir2 D3
+#define ir3 D6
+#define ir4 D7
+
+const char* ssid = "Kerajaan FIRAUN";
+const char* password = "Heyyounotyou0101";
+const char* telegramToken = "8006813593:AAE5IOZaz4d_0MfQGnAJPHx-zIBFta7bhkA";
+const char* chat_id = "5820132993";
+
+WiFiClientSecure client;
+UniversalTelegramBot bot(telegramToken, client);
+
+bool carFilled[4] = {false, false, false, false};
+bool notificationsEnabled = true;
+bool previousCarDetected[4] = {false, false, false, false};
+unsigned long slotOccupiedTime[4] = {0, 0, 0, 0};
+unsigned long slotEmptyTime[4] = {0, 0, 0, 0};
+
+// Define NTP client to get time
+WiFiUDP ntpUDP;
+NTPClient timeClient(ntpUDP, "pool.ntp.org", 8 * 3600, 60000);  // UTC + 8 hours for Malaysia
+
+unsigned long lastSummaryTime = 0;
+
+void setup() {
+  Serial.begin(115200);
+  pinMode(ir1, INPUT);
+  pinMode(ir2, INPUT);
+  pinMode(ir3, INPUT);
+  pinMode(ir4, INPUT);
+  client.setInsecure();  // Ignore SSL certificate
+
+  Serial.print("Connecting to WiFi");
+  WiFi.begin(ssid, password);
+  while (WiFi.status() != WL_CONNECTED) {
+    delay(500);
+    Serial.print(".");
+  }
+  Serial.println("\nConnected to WiFi");
+
+  // Initialize NTP Client
+  timeClient.begin();
+  updateLocalTime();
+}
+
+void loop() {
+  // Update NTP time
+  timeClient.update();
+  updateLocalTime();
+
+  carFilled[0] = digitalRead(ir1) == LOW;
+  carFilled[1] = digitalRead(ir2) == LOW;
+  carFilled[2] = digitalRead(ir3) == LOW;
+  carFilled[3] = digitalRead(ir4) == LOW;
+
+  for (int i = 0; i < 4; i++) {
+    if (carFilled[i] && notificationsEnabled && !previousCarDetected[i]) {
+      notifyCarFilled(i);
+      Serial.println("Slot " + String(i + 1) + " is Filled!");
+      previousCarDetected[i] = true;
+      slotOccupiedTime[i] = millis();
+    } else if (!carFilled[i] && notificationsEnabled && previousCarDetected[i]) {
+      notifyCarEmpty(i);
+      Serial.println("Slot " + String(i + 1) + " is Empty!");
+      previousCarDetected[i] = false;
+      slotEmptyTime[i] = millis();
+    }
+  }
+
+  // Check Telegram messages
+  int numNewMessages = bot.getUpdates(bot.last_message_received + 1);
+  for (int i = 0; i < numNewMessages; i++) {
+    String text = bot.messages[i].text;
+
+    if (text == "/status") {
+      String slotStatus = "";
+      for (int j = 0; j < 4; j++) {
+        slotStatus += "Slot " + String(j + 1) + ": " + (carFilled[j] ? "Yes" : "No") + "\n";
+      }
+      bot.sendMessage(chat_id, slotStatus, "");
+    } else if (text == "/on") {
+      notificationsEnabled = true;
+      bot.sendMessage(chat_id, "Notifications enabled.", "");
+    } else if (text == "/off") {
+      notificationsEnabled = false;
+      bot.sendMessage(chat_id, "Notifications disabled.", "");
+    }
+  }
+
+  // Send summary every minute
+  if (millis() - lastSummaryTime >= 60000) {  // 1 minute in milliseconds
+    sendSummary();
+    lastSummaryTime = millis();
+  }
+
+  delay(5000);  // Add a 5-second delay to prevent flooding Telegram
+}
+
+void notifyCarEmpty(int slot) {
+  String durationMessage = formatDuration(millis() - slotOccupiedTime[slot]);
+  String message = "Slot " + String(slot + 1) + " is empty on " + currentDateTime() + ". It was occupied for " + durationMessage + ".";
+  slotEmptyTime[slot] = millis();  // Reset the empty time
+  if (bot.sendMessage(chat_id, message, "")) {
+    Serial.println(message + " notification sent successfully.");
+  } else {
+    Serial.println("Failed to send " + message + " notification.");
+  }
+}
+
+void notifyCarFilled(int slot) {
+  String durationMessage = formatDuration(millis() - slotEmptyTime[slot]);
+  String message = "Slot " + String(slot + 1) + " is filled on " + currentDateTime() + ". It was empty for " + durationMessage + ".";
+  slotOccupiedTime[slot] = millis();  // Reset the occupied time
+  if (bot.sendMessage(chat_id, message, "")) {
+    Serial.println(message + " notification sent successfully.");
+  } else {
+    Serial.println("Failed to send " + message + " notification.");
+  }
+}
+
+void updateLocalTime() {
+  time_t rawTime = timeClient.getEpochTime();
+  setTime(rawTime);
+}
+
+String getDayOfWeek() {
+  switch (weekday()) {
+    case 1: return "Sunday";
+    case 2: return "Monday";
+    case 3: return "Tuesday";
+    case 4: return "Wednesday";
+    case 5: return "Thursday";
+    case 6: return "Friday";
+    case 7: return "Saturday";
+    default: return "";
+  }
+}
+
+String currentDateTime() {
+  return getDayOfWeek() + ", " + String(day()) + "/" + String(month()) + "/" + String(year()) + " " + String(hour()) + ":" + String(minute()) + ":" + String(second());
+}
+
+void sendSummary() {
+  String summary = "Parking Slot Summary at " + currentDateTime() + ":\n";
+  for (int i = 0; i < 4; i++) {
+    summary += "Slot " + String(i + 1) + ": " + (carFilled[i] ? "Occupied" : "Empty") + "\n";
+  }
+  if (bot.sendMessage(chat_id, summary, "")) {
+    Serial.println("Summary sent successfully.");
+  } else {
+    Serial.println("Failed to send summary.");
+  }
+}
+
+String formatDuration(unsigned long durationMillis) {
+  unsigned long durationSeconds = durationMillis / 1000;
+  if (durationSeconds < 60) {
+    return String(durationSeconds) + " seconds";
+  } else {
+    unsigned long minutes = durationSeconds / 60;
+    unsigned long seconds = durationSeconds % 60;
+    return String(minutes) + " minute" + (minutes > 1 ? "s" : "") + " " + String(seconds) + " second" + (seconds > 1 ? "s" : "");
+  }
+}
+
+
+//Duration time in minute and seconds
+
+/*
+Program Purpose
+This program is designed to monitor and manage car parking slots using an ESP8266 WiFi module and infrared sensors. The primary functionalities of the program include:
+
+Real-Time Monitoring: Continuously checks the status of four parking slots using infrared sensors to detect whether a slot is occupied or empty.
+
+Instant Notifications: Sends real-time notifications via Telegram whenever a parking slot becomes occupied or empty. This includes detailed duration information on how long each slot was occupied or empty.
+
+Periodic Summaries: Provides periodic summaries (every minute) of the current status of all parking slots, ensuring users are always up-to-date with the latest information.
+
+User Commands: Allows users to enable or disable notifications and request the current status of all parking slots via Telegram commands.
+
+Local Time Synchronization: Utilizes Network Time Protocol (NTP) to synchronize and display accurate local time and date (including the day of the week) in all notifications.
+*/
